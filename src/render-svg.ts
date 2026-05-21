@@ -286,7 +286,7 @@ export async function renderSvg(profile: HtbProfile): Promise<string> {
   height="${height}"
   viewBox="0 0 ${width} ${height}"
 >
-  <rect width="100%" height="100%" fill="${COLORS.bg}" />
+  <rect width="100%" height="100%" fill="transparent" />
 
   ${svg.innerHTML}
 
