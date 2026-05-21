@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+
+# build output
+build/
+
+# generated examples
+examples/
+assets/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# env
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# TypeScript
+*.tsbuildinfo

@@ -1,0 +1,67 @@
+# .github/workflows/generate-htb-card.yml
+
+name: Generate HTB Card
+
+on:
+  workflow_call:
+    inputs:
+      profile_id:
+        required: true
+        type: string
+
+      output_file:
+        required: false
+        type: string
+        default: assets/htb-card.svg
+
+jobs:
+  generate-card:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+
+      - name: Checkout generator repository
+        uses: actions/checkout@v4
+        with:
+          repository: jjimenezgarcia/htb-readme-card
+          path: .htb-card-generator
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: .htb-card-generator/package-lock.json
+
+      - name: Install dependencies
+        working-directory: .htb-card-generator
+        run: npm ci
+
+      - name: Generate SVG card
+        working-directory: .htb-card-generator
+        run: npm run generate -- ${{ inputs.profile_id }}
+
+      - name: Copy generated SVG
+        run: |
+          mkdir -p "$(dirname "${{ inputs.output_file }}")"
+          cp .htb-card-generator/dist/htb-card.svg "${{ inputs.output_file }}"
+
+      - name: Commit updated SVG
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add "${{ inputs.output_file }}"
+
+          if git diff --cached --quiet; then
+            echo "No changes detected"
+            exit 0
+          fi
+
+          git commit -m "Update HTB card"
+          git push

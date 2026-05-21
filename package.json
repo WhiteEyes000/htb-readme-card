@@ -1,0 +1,23 @@
+{
+  "name": "htb-readme-card",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "generate": "tsx src/cli.ts",
+    "watch": "nodemon --watch src --ext ts --exec \"tsx src/cli.ts\"",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "cheerio": "1.0.0-rc.12",
+    "roughjs": "4.6.6",
+    "svgdom": "0.1.22"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.4",
+    "nodemon": "3.1.10",
+    "tsx": "4.19.4",
+    "typescript": "5.8.3"
+  }
+}
