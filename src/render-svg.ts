@@ -9,6 +9,9 @@ import { renderRankIcon } from "./render-rank.js";
 import type { HtbRank } from "./ranks.js";
 import type { HtbProfile } from "./types.js";
 
+const HTB_LOGO_URL =
+  "https://www.hackthebox.com/hubfs/raw_assets/HackTheBox/44/js_client_assets/assets/nav-logo-3JkQrnNl.svg";
+
 const COLORS = {
   bg: "#0b121f",
   card: "#111927",
@@ -143,6 +146,20 @@ async function renderAvatar(profile: HtbProfile): Promise<string> {
 />`;
 }
 
+async function renderHtbLogo(): Promise<string> {
+  const logoDataUri = await imageUrlToDataUri(HTB_LOGO_URL);
+
+  return `
+<image
+  href="${logoDataUri}"
+  x="620"
+  y="62"
+  width="160"
+  height="42"
+  preserveAspectRatio="xMidYMid meet"
+/>`;
+}
+
 export async function renderSvg(profile: HtbProfile): Promise<string> {
   const width = 860;
   const height = 470;
@@ -261,7 +278,7 @@ export async function renderSvg(profile: HtbProfile): Promise<string> {
 
   const rankIcon = await renderRankIcon(normalizeRank(profile.rank), 150);
   const avatarSvg = await renderAvatar(profile);
-
+  const htbLogoSvg = await renderHtbLogo();
   return `
 <svg
   xmlns="http://www.w3.org/2000/svg"
@@ -274,6 +291,8 @@ export async function renderSvg(profile: HtbProfile): Promise<string> {
   ${svg.innerHTML}
 
   ${avatarSvg}
+
+  ${htbLogoSvg}
 
   ${text(profile.avatar ? 132 : 68, 84, profile.username, 34, 700)}
 
