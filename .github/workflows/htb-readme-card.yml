@@ -28,7 +28,7 @@ jobs:
       - name: Checkout generator repository
         uses: actions/checkout@v4
         with:
-          repository: jjimenezgarcia/htb-readme-card
+          repository: WhiteEyes000/htb-readme-card
           path: .htb-card-generator
 
       - name: Setup Node.js
