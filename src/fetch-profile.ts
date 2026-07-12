@@ -1,13 +1,20 @@
 import https from "node:https";
 
-import * as cheerio from "cheerio";
-
 import type { HtbCertification, HtbProfile } from "./types.js";
 
 const HTB_PROFILE_BASE = "https://profile.hackthebox.com";
 
 const USER_AGENT =
   "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:150.0) Gecko/20100101 Firefox/150.0";
+
+const PROFILE_SCHEMA_KEYS = [
+  "id",
+  "account_id",
+  "name",
+  "full_name",
+  "avatar",
+  "avatar_thumb",
+] as const;
 
 type AnyRecord = Record<string, unknown>;
 
@@ -33,10 +40,6 @@ type HtbExperienceResponse = {
   experienceUntilNextLevel: number;
 };
 
-function clean(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
 function extractProfileUuid(value: string): string {
   const match = value.match(
     /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
@@ -49,23 +52,137 @@ function extractProfileUuid(value: string): string {
   return match[0];
 }
 
-function extractIdentityFromHtml(html: string): ProfileIdentity {
+function parseNuxtPayload(html: string): unknown[] | null {
   const match = html.match(
-    /"id":\d+,"account_id":\d+,"name":\d+,"full_name":\d+[^]*?"([0-9a-f-]{36})","([0-9a-f-]{36})","([^"]+)","([^"]+)"[^]*?"(https:\\u002F\\u002F[^"]+avatar\.png)","(https:\\u002F\\u002F[^"]+avatar_thumb\.png)"/i
+    /<script[^>]*>\s*(\[[\s\S]*?\])\s*<\/script>/
   );
 
   if (!match) {
-    throw new Error("Could not extract HTB identity block");
+    return null;
   }
 
-  return {
-    profileUuid: match[1],
-    accountUuid: match[2],
-    username: match[3],
-    fullName: match[4],
-    avatar: match[5].replaceAll("\\u002F", "/"),
-    avatarThumb: match[6].replaceAll("\\u002F", "/"),
-  };
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+function resolveNuxtRef(data: unknown[], ref: unknown): unknown {
+  if (typeof ref === "number" && ref >= 0 && ref < data.length) {
+    const resolved = data[ref];
+
+    if (Array.isArray(resolved) && resolved.length === 2 && typeof resolved[0] === "string") {
+      return resolveNuxtRef(data, resolved[1]);
+    }
+
+    if (resolved && typeof resolved === "object" && !Array.isArray(resolved)) {
+      return resolveNuxtObject(data, resolved as AnyRecord);
+    }
+
+    return resolved;
+  }
+
+  if (Array.isArray(ref)) {
+    return ref.map((item) => resolveNuxtRef(data, item));
+  }
+
+  return ref;
+}
+
+function resolveNuxtObject(data: unknown[], obj: AnyRecord): AnyRecord {
+  const result: AnyRecord = {};
+
+  for (const [key, value] of Object.entries(obj)) {
+    result[key] = resolveNuxtRef(data, value);
+  }
+
+  return result;
+}
+
+function isProfileSchema(obj: unknown): obj is AnyRecord {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+    return false;
+  }
+
+  return PROFILE_SCHEMA_KEYS.every((key) => key in obj);
+}
+
+function findProfileSchema(payload: unknown[]): AnyRecord | null {
+  for (const item of payload) {
+    if (isProfileSchema(item)) {
+      return item;
+    }
+  }
+
+  return null;
+}
+
+function extractIdentityFromPayload(payload: unknown[]): ProfileIdentity {
+  const schema = findProfileSchema(payload);
+
+  if (!schema) {
+    throw new Error("Could not find profile schema in Nuxt payload");
+  }
+
+  const profile = resolveNuxtObject(payload, schema);
+
+  const accountUuid = String(profile.account_id ?? "");
+  const profileUuid = String(profile.id ?? "");
+  const username = String(profile.name ?? "");
+  const fullName = String(profile.full_name ?? "");
+  const avatar = profile.avatar ? String(profile.avatar) : "";
+  const avatarThumb = profile.avatar_thumb ? String(profile.avatar_thumb) : "";
+
+  if (!accountUuid || !username) {
+    throw new Error("Could not extract HTB identity from Nuxt payload");
+  }
+
+  return { profileUuid, accountUuid, username, fullName, avatar, avatarThumb };
+}
+
+function extractCertificationsFromPayload(
+  payload: unknown[]
+): HtbCertification[] {
+  const dataMap = payload[3];
+
+  if (!dataMap || typeof dataMap !== "object" || Array.isArray(dataMap)) {
+    return [];
+  }
+
+  const certIndex = (dataMap as AnyRecord)["$sprofile-internal-certifications"];
+
+  if (typeof certIndex !== "number" || certIndex >= payload.length) {
+    return [];
+  }
+
+  const certList = resolveNuxtRef(payload, certIndex);
+
+  if (!Array.isArray(certList) || certList.length === 0) {
+    return [];
+  }
+
+  return certList
+    .map((item): HtbCertification | null => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return null;
+      }
+
+      const cert = item as AnyRecord;
+      const name = String(cert.name ?? "");
+      const code = String(cert.code ?? cert.id ?? "");
+      const date = String(cert.awarded_at ?? cert.date ?? "");
+      const svg = cert.svg ? String(cert.svg) : undefined;
+
+      return {
+        name,
+        code,
+        date: date.split("T")[0],
+        verified: true,
+        svg,
+      };
+    })
+    .filter((cert): cert is HtbCertification => cert !== null);
 }
 
 function asRecord(value: unknown): AnyRecord {
@@ -126,47 +243,6 @@ function fetchTextWithCookie(
   });
 }
 
-function extractCertificationsFromHtml(html: string): HtbCertification[] {
-  const $ = cheerio.load(html);
-
-  return $("li.internal-certification, .internal-certification")
-    .map((_, element): HtbCertification | null => {
-      const $element = $(element);
-      const svg =
-        $element.find(".icon-container svg").first().toString() ||
-        $element.find("svg").first().toString();
-
-      if (!svg) {
-        return null;
-      }
-
-      const fullText = clean($element.text());
-      const code = clean(fullText.match(/HTB[A-Z0-9-]+/i)?.[0] ?? "");
-      const date =
-        clean(fullText.match(/\d{1,2}\s+[A-Za-z]+\s+\d{4}/)?.[0] ?? "") ||
-        clean(fullText.match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? "");
-      const name =
-        clean(
-          $element
-            .find(
-              ".htb-font-size-16, .htb-font-weight-500, .htb-text-white, h3, h4, h5, h6"
-            )
-            .first()
-            .text()
-        ) || clean(fullText.replace(code, "").replace(date, ""));
-
-      return {
-        name,
-        code,
-        date,
-        verified: true,
-        svg,
-      };
-    })
-    .get()
-    .filter((cert): cert is HtbCertification => Boolean(cert));
-}
-
 export async function fetchProfile(
   profileUrlOrUuid: string
 ): Promise<HtbProfile> {
@@ -177,7 +253,13 @@ export async function fetchProfile(
     accept: "text/html,application/xhtml+xml",
   });
 
-  const identity = extractIdentityFromHtml(html);
+  const payload = parseNuxtPayload(html);
+
+  if (!payload) {
+    throw new Error("Could not parse Nuxt payload from profile page");
+  }
+
+  const identity = extractIdentityFromPayload(payload);
   const experienceUrl = `${HTB_PROFILE_BASE}/api/experience/v1/account/${identity.accountUuid}`;
 
   const { body: jsonText } = await fetchTextWithCookie(experienceUrl, {
@@ -200,6 +282,6 @@ export async function fetchProfile(
     xpNext,
     rank: experience.levelTitle ?? "Beginner",
     grade: experience.levelGrade ?? "1",
-    certifications: extractCertificationsFromHtml(html),
+    certifications: extractCertificationsFromPayload(payload),
   };
 }
